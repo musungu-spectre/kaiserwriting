@@ -1237,9 +1237,11 @@ function productMediaEmbed(product){
   const mediaId = `product-media-${product.id}`;
 
   if (/screenpal\.com\/watch|youtube\.com|youtu\.be|vimeo\.com/i.test(lower)) {
+    const embedHref = /screenpal\.com\/watch/i.test(href) ? href.replace(/\/watch\//i, '/player/') : href;
     return `
-      <div id="${escapeHtml(mediaId)}" style="margin-top:28px; background:rgba(36,28,16,0.7); border:2px solid var(--gold); border-radius:12px; padding:10px;">
-        <iframe src="${escapeHtml(href)}" title="${escapeHtml(product.title)}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen style="width:100%; aspect-ratio:16/9; border:0; border-radius:8px; background:#000;"></iframe>
+      <div id="${escapeHtml(mediaId)}" data-open-url="${escapeHtml(embedHref)}" style="margin-top:28px; background:rgba(36,28,16,0.7); border:2px solid var(--gold); border-radius:12px; padding:10px;">
+        <iframe src="${escapeHtml(embedHref)}" title="${escapeHtml(product.title)}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen style="width:100%; aspect-ratio:16/9; border:0; border-radius:8px; background:#000;"></iframe>
+        <a class="btn btn-primary btn-block" href="${escapeHtml(embedHref)}" target="_blank" rel="noopener" style="margin-top:10px;">Open player on phone</a>
       </div>`;
   }
 
@@ -1275,6 +1277,9 @@ function playProductMedia(button){
   media.scrollIntoView({ behavior: 'smooth', block: 'center' });
   const player = media.querySelector('audio, video');
   if(player){ player.play().catch(() => {}); }
+  else if(media.dataset.openUrl && window.matchMedia('(max-width: 700px)').matches){
+    window.open(media.dataset.openUrl, '_blank', 'noopener,noreferrer');
+  }
 }
 
 function productView(id){
