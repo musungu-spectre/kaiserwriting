@@ -1456,7 +1456,23 @@ async function init(){
   if(isLive()){
     try{
       const liveProducts = await apiCall('/products', 'GET');
+      const locallySavedProducts = await storeGet('products', true);
       products = normalizeProducts(liveProducts);
+      if(Array.isArray(locallySavedProducts)){
+        const localById = new Map(locallySavedProducts.filter(item => item && item.id).map(item => [String(item.id), item]));
+        products = products.map(product => {
+          const local = localById.get(String(product.id));
+          if(!local) return product;
+          return {
+            ...product,
+            fileLink: product.fileLink || local.fileLink || null,
+            coverImage: product.coverImage || local.coverImage || null,
+            galleryImages: Array.isArray(product.galleryImages) && product.galleryImages.length
+              ? product.galleryImages
+              : (Array.isArray(local.galleryImages) ? local.galleryImages : [])
+          };
+        });
+      }
     } catch(err){
       products = normalizeProducts(DEFAULT_PRODUCTS);
     }
