@@ -429,6 +429,9 @@ const NETWORKS = ["MTN Mobile Money","Airtel Money","Zamtel Kwacha","M-Pesa","Ca
 const TYPES = ["Book","Poem","Podcast – Audio","Podcast – Video"];
 const TYPE_ICON = {"Book":"📖","Poem":"🖋️","Podcast – Audio":"🎙️","Podcast – Video":"🎥"};
 const CATEGORIES = ["All","Book","Poem","Podcast"];
+const PUBLIC_MEDIA_FALLBACKS = {
+  "tefumo lyandi": "https://go.screenpal.com/watch/cOQYjJnxePF"
+};
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function money(amount, currency){ const n = Number(amount); return currency + " " + n.toLocaleString(undefined,{maximumFractionDigits:0}); }
@@ -488,6 +491,7 @@ function normalizeProducts(rawProducts){
     seen.add(key);
 
     const fallback = canonicalById.get(product.id) || canonicalByTitle.get(String(product.title).trim().toLowerCase());
+    const publicMediaFallback = PUBLIC_MEDIA_FALLBACKS[String(product.title).trim().toLowerCase()] || null;
     const hasExplicitFileLink = Object.prototype.hasOwnProperty.call(product, 'fileLink');
     const hasExplicitCoverImage = Object.prototype.hasOwnProperty.call(product, 'coverImage');
     const hasExplicitGalleryImages = Object.prototype.hasOwnProperty.call(product, 'galleryImages');
@@ -495,7 +499,9 @@ function normalizeProducts(rawProducts){
     const merged = {
       ...(fallback || {}),
       ...product,
-      fileLink: hasExplicitFileLink ? (product.fileLink || null) : ((fallback && fallback.fileLink) || null),
+      fileLink: hasExplicitFileLink
+        ? (product.fileLink || publicMediaFallback || null)
+        : ((fallback && fallback.fileLink) || publicMediaFallback || null),
       coverImage: hasExplicitCoverImage ? (product.coverImage || null) : ((fallback && fallback.coverImage) || null),
       galleryImages: hasExplicitGalleryImages
         ? (Array.isArray(product.galleryImages) ? product.galleryImages : [])
@@ -1278,7 +1284,7 @@ function playProductMedia(button){
   const player = media.querySelector('audio, video');
   if(player){ player.play().catch(() => {}); }
   else if(media.dataset.openUrl && window.matchMedia('(max-width: 700px)').matches){
-    window.open(media.dataset.openUrl, '_blank', 'noopener,noreferrer');
+    window.location.href = media.dataset.openUrl;
   }
 }
 
