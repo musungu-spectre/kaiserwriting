@@ -519,6 +519,14 @@ async function persistLocalDashboardState(){
   try { await storeSet('profile', profile, true); } catch (e) { console.warn('Could not persist profile:', e.message); }
   try { await storeSet('subscribers', subscribers, true); } catch (e) { console.warn('Could not persist subscribers:', e.message); }
 }
+async function persistMediaLink(product, fileLink){
+  if(!product || !isPublicMediaUrl(fileLink)) return;
+  const links = await storeGet('public-media-links', true) || {};
+  const titleKey = String(product.title || '').trim().toLowerCase();
+  if(product.id) links['id:' + product.id] = fileLink;
+  if(titleKey) links['title:' + titleKey] = fileLink;
+  await storeSet('public-media-links', links, true);
+}
 async function registerVisitor(){
   visitorSessionId = await storeGet('visitor-session-id', false);
   if(!visitorSessionId){
@@ -1051,6 +1059,7 @@ async function addProduct(){
 
   if(isLive()){
     try{
+      await persistMediaLink({ id: editProductId || null, title }, fileLink);
       const saved = await apiCall(editProductId ? '/products/' + editProductId : '/products', editProductId ? 'PATCH' : 'POST', {
         title, description, type, currency, price: numericPrice, coverImage, fileLink, upcoming, notify
       }, authToken);
@@ -1468,22 +1477,22 @@ async function init(){
     try{
       const liveProducts = await apiCall('/products', 'GET');
       const locallySavedProducts = await storeGet('products', true);
+      const savedMediaLinks = await storeGet('public-media-links', true) || {};
       products = normalizeProducts(liveProducts);
-      if(Array.isArray(locallySavedProducts)){
-        const localById = new Map(locallySavedProducts.filter(item => item && item.id).map(item => [String(item.id), item]));
-        products = products.map(product => {
-          const local = localById.get(String(product.id));
-          if(!local) return product;
+      const localById = new Map(Array.isArray(locallySavedProducts) ? locallySavedProducts.filter(item => item && item.id).map(item => [String(item.id), item]) : []);
+      const localByTitle = new Map(Array.isArray(locallySavedProducts) ? locallySavedProducts.filter(item => item && item.title).map(item => [String(item.title).trim().toLowerCase(), item]) : []);
+      products = products.map(product => {
+          const local = localById.get(String(product.id)) || localByTitle.get(String(product.title).trim().toLowerCase());
+          const savedLink = savedMediaLinks['id:' + product.id] || savedMediaLinks['title:' + String(product.title).trim().toLowerCase()] || (local && local.fileLink) || null;
           return {
             ...product,
-            fileLink: product.fileLink || local.fileLink || null,
-            coverImage: product.coverImage || local.coverImage || null,
+            fileLink: product.fileLink || savedLink || null,
+            coverImage: product.coverImage || (local && local.coverImage) || null,
             galleryImages: Array.isArray(product.galleryImages) && product.galleryImages.length
               ? product.galleryImages
-              : (Array.isArray(local.galleryImages) ? local.galleryImages : [])
+              : (local && Array.isArray(local.galleryImages) ? local.galleryImages : [])
           };
-        });
-      }
+      });
     } catch(err){
       products = normalizeProducts(DEFAULT_PRODUCTS);
     }
