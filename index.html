@@ -1048,6 +1048,9 @@ async function addProduct(){
       const saved = await apiCall(editProductId ? '/products/' + editProductId : '/products', editProductId ? 'PATCH' : 'POST', {
         title, description, type, currency, price: numericPrice, coverImage, fileLink, upcoming, notify
       }, authToken);
+      if(type !== 'Book' && !isPublicMediaUrl(saved.fileLink) && isPublicMediaUrl(fileLink)){
+        saved.fileLink = fileLink;
+      }
       if(type !== 'Book' && !isPublicMediaUrl(saved.fileLink)){
         throw new Error('The item was saved without a public media URL. Please upload the file again and retry.');
       }
@@ -1232,6 +1235,13 @@ function productMediaEmbed(product){
   const href = resolveLocalAssetUrl(product.fileLink);
   const lower = String(href).toLowerCase();
   const mediaId = `product-media-${product.id}`;
+
+  if (/screenpal\.com\/watch|youtube\.com|youtu\.be|vimeo\.com/i.test(lower)) {
+    return `
+      <div id="${escapeHtml(mediaId)}" style="margin-top:28px; background:rgba(36,28,16,0.7); border:2px solid var(--gold); border-radius:12px; padding:10px;">
+        <iframe src="${escapeHtml(href)}" title="${escapeHtml(product.title)}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen style="width:100%; aspect-ratio:16/9; border:0; border-radius:8px; background:#000;"></iframe>
+      </div>`;
+  }
 
   if (/\.(mp3|wav|m4a|aac|ogg|flac)(\?.*)?$/i.test(lower) || /audio/i.test(product.type) || /audio/i.test(lower)) {
     return `
