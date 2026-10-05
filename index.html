@@ -346,7 +346,7 @@ async function storeSet(key, value, shared){
    Once you deploy the companion backend (see /kaisier-backend in your
    downloads) and know its live URL, paste it below, e.g.:
    const API_BASE = "https://kaisier-backend.onrender.com";
-   The site will then use real Flutterwave payments, real login, real
+  The site will then use Lenco mobile-money payments, real login, real
    file delivery, and real subscriber emails automatically. */
 const API_BASE = "https://kaisier-writings-3.onrender.com";
 async function apiCall(path, method, body, token){
@@ -411,6 +411,7 @@ let profile = null;
 let products = [];
 let toast = null;
 let checkoutState = null;
+let checkoutPollTimer = null;
 let editProductId = null;
 let catFilter = 'All';
 let dashTab = 'products';
@@ -425,7 +426,7 @@ let chatOpen = false;
 let chatMessages = [{ from:'bot', text:'Hi, I’m the Kaisier Writing guide. Ask me about the books, free poems, podcasts, payments, or how to reach Chanda.' }];
 
 const CURRENCIES = ["ZMW","NGN","GHS","KES","UGX","ZAR","USD"];
-const NETWORKS = ["MTN Mobile Money","Airtel Money","Zamtel Kwacha","M-Pesa","Card / Bank"];
+const NETWORKS = ["MTN Mobile Money","Airtel Money","Zamtel Kwacha"];
 const TYPES = ["Book","Poem","Podcast – Audio","Podcast – Video"];
 const TYPE_ICON = {"Book":"📖","Poem":"🖋️","Podcast – Audio":"🎙️","Podcast – Video":"🎥"};
 const CATEGORIES = ["All","Book","Poem","Podcast"];
@@ -1336,9 +1337,14 @@ function productView(id){
 function openCheckout(id){
   const product = products.find(x=>x.id===id);
   if(!product || isFreeProduct(product)) return;
-  checkoutState = { product, stage: 'select', network: null, error: null }; render();
+  checkoutState = { product, stage: 'select', network: null, error: null, pollAttempts: 0 }; render();
 }
-function closeCheckout(){ checkoutState = null; render(); }
+function closeCheckout(){
+  if(checkoutPollTimer) clearTimeout(checkoutPollTimer);
+  checkoutPollTimer = null;
+  checkoutState = null;
+  render();
+}
 function selectNetwork(n){ checkoutState.network = n; render(); }
 function payNow(){
   const phone = document.getElementById('co-phone').value.trim();
@@ -1349,13 +1355,51 @@ function payNow(){
 }
 async function payNowLive(){
   const email = document.getElementById('co-email').value.trim();
+  const phone = document.getElementById('co-phone').value.trim();
+  const operator = document.getElementById('co-operator').value;
   if(!email || !email.includes('@')){ alert('Enter a valid email.'); return; }
-  checkoutState.stage = 'paying'; checkoutState.error = null; render();
+  if(!phone){ alert('Enter your mobile-money phone number.'); return; }
+  if(!operator){ alert('Choose your mobile-money network.'); return; }
+  checkoutState.email = email;
+  checkoutState.stage = 'initiating'; checkoutState.error = null; render();
   try{
-    const data = await apiCall('/payments/initiate', 'POST', { productId: checkoutState.product.id, email });
-    window.location.href = data.paymentLink; // Flutterwave hosted checkout
+    const data = await apiCall('/payments/initiate', 'POST', { productId: checkoutState.product.id, email, phone, operator });
+    checkoutState.reference = data.reference;
+    checkoutState.statusMessage = data.message;
+    checkoutState.pollAttempts = 0;
+    checkoutState.stage = 'pending';
+    render();
+    pollLencoPayment(data.reference);
   } catch(err){
     checkoutState.stage = 'select'; checkoutState.error = err.message; render();
+  }
+}
+async function pollLencoPayment(reference, manual){
+  if(!checkoutState || checkoutState.reference !== reference) return;
+  if(checkoutPollTimer) clearTimeout(checkoutPollTimer);
+  checkoutPollTimer = null;
+  if(!manual && checkoutState.pollAttempts >= 24) return;
+  checkoutState.pollAttempts = (checkoutState.pollAttempts || 0) + 1;
+  try{
+    const result = await apiCall('/payments/status/' + encodeURIComponent(reference), 'GET');
+    if(!checkoutState || checkoutState.reference !== reference) return;
+    if(result.status === 'paid'){
+      checkoutState.stage = 'done';
+      render();
+      return;
+    }
+    if(result.status === 'failed'){
+      checkoutState.stage = 'failed';
+      render();
+      return;
+    }
+  } catch(err){
+    console.warn('Lenco status check will retry:', err.message);
+  }
+  if(checkoutState && checkoutState.reference === reference && checkoutState.pollAttempts < 24){
+    checkoutPollTimer = setTimeout(() => pollLencoPayment(reference), 5000);
+  } else if(checkoutState && checkoutState.reference === reference){
+    render();
   }
 }
 function checkoutModal(){
@@ -1368,12 +1412,18 @@ function checkoutModal(){
         <p style="font-size:13.5px;color:#9C917F;margin:0 0 18px;">for "${escapeHtml(p.title)}"</p>
         ${checkoutState.error ? `<div class="alert" style="background:#F5D6CC;">${escapeHtml(checkoutState.error)}</div>` : ''}
         <div class="field"><label>Email <span class="hint">Your download link goes here too</span></label><input id="co-email" type="email" placeholder="you@example.com"></div>
-        <button class="btn btn-primary btn-block" onclick="payNowLive()">Continue to secure payment</button>
-        <p style="font-size:11.5px;color:#8C8272;margin-top:12px;">You'll choose mobile money or card on the next screen.</p>`;
+        <div class="field"><label>Mobile money network</label><select id="co-operator"><option value="">Choose a network</option><option value="mtn">MTN Mobile Money</option><option value="airtel">Airtel Money</option><option value="zamtel">Zamtel Kwacha</option></select></div>
+        <div class="field"><label>Phone number</label><input id="co-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="097 000 0000"></div>
+        <button class="btn btn-primary btn-block" onclick="payNowLive()">Request payment</button>
+        <p style="font-size:11.5px;color:#8C8272;margin-top:12px;">A payment authorization prompt will be sent to your phone. Card payments are not enabled.</p>`;
+    } else if(checkoutState.stage === 'pending' || checkoutState.stage === 'initiating'){
+      inner = `<div style="text-align:center;padding:20px 0;"><span class="spinner"></span><h3>${checkoutState.stage === 'initiating' ? 'Contacting Lenco…' : 'Approve payment on your phone'}</h3><p style="color:#9C917F;font-size:14px;">${escapeHtml(checkoutState.statusMessage || 'Check your mobile-money phone and authorize the payment request.')}</p>${checkoutState.pollAttempts >= 24 ? `<button class="btn btn-primary btn-block" onclick="pollLencoPayment('${escapeHtml(checkoutState.reference)}',true)">Check payment status</button>` : ''}</div>`;
+    } else if(checkoutState.stage === 'done'){
+      inner = `<div style="text-align:center;"><div class="success-icon">${ICON.success}</div><h3>Payment received</h3><p style="color:#9C917F;font-size:14px;margin-bottom:18px;">Your download link has been sent to ${escapeHtml(checkoutState.email || 'your email')}.</p><button class="btn btn-dark btn-block" onclick="closeCheckout()">Done</button></div>`;
     } else {
-      inner = `<div style="text-align:center;padding:20px 0;"><span class="spinner"></span><h3 style="display:inline;">Redirecting to payment…</h3></div>`;
+      inner = `<div style="text-align:center;"><h3>Payment not completed</h3><p style="color:#9C917F;font-size:14px;margin-bottom:18px;">The mobile-money request failed or was declined. You can try again.</p><button class="btn btn-primary btn-block" onclick="checkoutState.stage='select';checkoutState.reference=null;checkoutState.error=null;render()">Try again</button></div>`;
     }
-    return `<div class="modal-backdrop" onclick="if(event.target===this && checkoutState.stage!=='paying') closeCheckout()"><div class="modal">${inner}</div></div>`;
+    return `<div class="modal-backdrop" onclick="if(event.target===this && checkoutState.stage!=='initiating') closeCheckout()"><div class="modal">${inner}</div></div>`;
   }
   if(checkoutState.stage === 'select'){
     inner = `
