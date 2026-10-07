@@ -1321,6 +1321,7 @@ async function saveProfileEdits(){
 
 /* ---------- PRODUCT PAGE ---------- */
 function productMediaEmbed(product){
+  if(product && product.type === 'Book' && Number(product.price) > 0) return '';
   if (!product || !product.fileLink) return '';
   const href = resolveLocalAssetUrl(product.fileLink);
   const lower = String(href).toLowerCase();
@@ -1331,7 +1332,10 @@ function productMediaEmbed(product){
     return `
       <div id="${escapeHtml(mediaId)}" data-open-url="${escapeHtml(driveUrls.preview)}" style="margin-top:28px; background:rgba(36,28,16,0.7); border:2px solid var(--gold); border-radius:12px; padding:10px;">
         <iframe src="${escapeHtml(driveUrls.preview)}" title="${escapeHtml(product.title)}" allow="autoplay; fullscreen" allowfullscreen loading="lazy" style="width:100%; aspect-ratio:16/10; border:0; border-radius:8px; background:#000;"></iframe>
-        <a class="btn btn-primary btn-block" href="${escapeHtml(driveUrls.download)}" target="_blank" rel="noopener" style="margin-top:10px;">Open or download from Google Drive</a>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+          <a class="btn btn-primary" href="${escapeHtml(driveUrls.preview)}" target="_blank" rel="noopener">Open</a>
+          <a class="btn btn-dark" href="${escapeHtml(driveUrls.download)}" target="_blank" rel="noopener">Download</a>
+        </div>
       </div>`;
   }
 
@@ -1468,6 +1472,7 @@ async function pollLencoPayment(reference, manual){
     if(!checkoutState || checkoutState.reference !== reference) return;
     if(result.status === 'paid'){
       checkoutState.stage = 'done';
+      checkoutState.openUrl = result.openUrl;
       checkoutState.downloadUrl = result.downloadUrl;
       render();
       return;
@@ -1503,7 +1508,7 @@ function checkoutModal(){
     } else if(checkoutState.stage === 'pending' || checkoutState.stage === 'initiating'){
       inner = `<div style="text-align:center;padding:20px 0;"><span class="spinner"></span><h3>${checkoutState.stage === 'initiating' ? 'Contacting Lenco…' : 'Approve payment on your phone'}</h3><p style="color:#9C917F;font-size:14px;">${escapeHtml(checkoutState.statusMessage || 'Check your mobile-money phone and authorize the payment request.')}</p>${checkoutState.pollAttempts >= 24 ? `<button class="btn btn-primary btn-block" onclick="pollLencoPayment('${escapeHtml(checkoutState.reference)}',true)">Check payment status</button>` : ''}</div>`;
     } else if(checkoutState.stage === 'done'){
-      inner = `<div style="text-align:center;"><div class="success-icon">${ICON.success}</div><h3>Payment received</h3><p style="color:#9C917F;font-size:14px;margin-bottom:18px;">Your purchase is ready. Download it now; a backup link is sent to ${escapeHtml(checkoutState.email || 'your email')}.</p>${checkoutState.downloadUrl ? `<a class="btn btn-primary btn-block" href="${escapeHtml(checkoutState.downloadUrl)}">Download ${escapeHtml(p.title)}</a>` : `<div class="alert alert-info">The download link is still being prepared. Check your email shortly.</div>`}<button class="btn btn-dark btn-block" style="margin-top:10px;" onclick="closeCheckout()">Done</button></div>`;
+      inner = `<div style="text-align:center;"><div class="success-icon">${ICON.success}</div><h3>Payment received</h3><p style="color:#9C917F;font-size:14px;margin-bottom:18px;">Your purchase is ready. Open or download it now; backup links are sent to ${escapeHtml(checkoutState.email || 'your email')}.</p>${checkoutState.openUrl ? `<a class="btn btn-dark btn-block" href="${escapeHtml(checkoutState.openUrl)}" target="_blank" rel="noopener">Open</a>` : ''}${checkoutState.downloadUrl ? `<a class="btn btn-primary btn-block" style="margin-top:10px;" href="${escapeHtml(checkoutState.downloadUrl)}">Download</a>` : `<div class="alert alert-info">The download is still being prepared. Check your email shortly.</div>`}<button class="btn btn-dark btn-block" style="margin-top:10px;" onclick="closeCheckout()">Done</button></div>`;
     } else {
       inner = `<div style="text-align:center;"><h3>Payment not completed</h3><p style="color:#9C917F;font-size:14px;margin-bottom:18px;">The mobile-money request failed or was declined. You can try again.</p><button class="btn btn-primary btn-block" onclick="checkoutState.stage='select';checkoutState.reference=null;checkoutState.error=null;render()">Try again</button></div>`;
     }
@@ -1617,10 +1622,11 @@ async function init(){
       const localByTitle = new Map(Array.isArray(locallySavedProducts) ? locallySavedProducts.filter(item => item && item.title).map(item => [String(item.title).trim().toLowerCase(), item]) : []);
       products = products.map(product => {
           const local = localById.get(String(product.id)) || localByTitle.get(String(product.title).trim().toLowerCase());
-          const savedLink = savedMediaLinks['id:' + product.id] || savedMediaLinks['title:' + String(product.title).trim().toLowerCase()] || (local && local.fileLink) || null;
+          const paidBook = product.type === 'Book' && Number(product.price) > 0;
+          const savedLink = paidBook ? null : (savedMediaLinks['id:' + product.id] || savedMediaLinks['title:' + String(product.title).trim().toLowerCase()] || (local && local.fileLink) || null);
           return {
             ...product,
-            fileLink: product.fileLink || savedLink || null,
+            fileLink: paidBook ? null : (product.fileLink || savedLink || null),
             coverImage: product.coverImage || (local && local.coverImage) || null,
             galleryImages: Array.isArray(product.galleryImages) && product.galleryImages.length
               ? product.galleryImages
